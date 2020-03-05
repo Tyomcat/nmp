@@ -6,6 +6,8 @@ import threading
 import select
 import pysnooper
 
+from encode import RandomEncoder
+
 BUFFER = 4096
 
 class Handle:
@@ -14,6 +16,8 @@ class Handle:
         self.addr = addr
         self.host = host
         self.port = port
+        self.encoder = RandomEncoder()
+        self.encoder.load('/tmp/nmp.json')
 
     # @pysnooper.snoop()
     def handle(self):
@@ -48,12 +52,20 @@ class Handle:
 
     def recv_and_send(self, recv_fd, send_fd):
         # recv() is a block I/O, returns '' when remote has been closed.
-        bf = recv_fd.recv(BUFFER)
-        if bf == b'':
-            self.close_fdsets((recv_fd, send_fd))
-            self.shutdown()
+        if recv_fd == self.fd:
+            bf = recv_fd.recv(BUFFER)
+            if bf == b'':
+                self.close_fdsets((recv_fd, send_fd))
+                self.shutdown()
 
-        send_fd.sendall(bf)
+            self.encoder.sendall(send_fd, bf)
+        else:
+            bf = self.encoder.recv(recv_fd, BUFFER)
+            if bf == b'':
+                self.close_fdsets((recv_fd, send_fd))
+                self.shutdown()
+
+            send_fd.sendall(bf)
 
     def close_fdsets(self, fdsets):
         try:

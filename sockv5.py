@@ -7,6 +7,8 @@ import select
 import pysnooper
 import struct
 
+from encode import RandomEncoder
+
 BUFFER = 4096
 SOCK_V5 = 5
 RSV = 0
@@ -19,6 +21,8 @@ class Handle:
     def __init__(self, fd, addr):
         self.fd = fd
         self.addr = addr
+        self.encoder = RandomEncoder()
+        self.encoder.load('/tmp/nmp.json')
 
     # @pysnooper.snoop()
     def handle(self):
@@ -34,20 +38,20 @@ class Handle:
         self.enter_pip_loop(self.fd, fd)
 
     def handle_version_and_auth(self):
-        bf = self.fd.recv(BUFFER)
+        bf = self.encoder.recv(self.fd, BUFFER)
         ver, nmethods = struct.unpack('!BB', bf[0:2])
         if SOCK_V5 != ver:
             return False
 
         for method in [ord(bf[2 + i : 3 + i]) for i in range(nmethods)]:
             if method in IMPLEMENTED_METHODS:
-                self.fd.send(struct.pack('!BB', SOCK_V5, method))
+                self.encoder.sendall(self.fd, struct.pack('!BB', SOCK_V5, method))
                 return True
 
         return False
 
     def handle_connect(self):
-        bf = self.fd.recv(BUFFER)
+        bf = self.encoder.recv(self.fd, BUFFER)
         ver, cmd, _, atyp = struct.unpack('!BBBB', bf[0:4])
         if CMD_CONNECT != cmd:
             return None
@@ -76,7 +80,7 @@ class Handle:
             fd.close()
             fd = None
 
-        self.fd.sendall(reply)
+        self.encoder.sendall(self.fd, reply)
         return fd
 
     def handle_noblock(self):
@@ -101,12 +105,20 @@ class Handle:
 
     def recv_and_send(self, recv_fd, send_fd):
         # recv() is a block I/O, returns '' when remote has been closed.
-        bf = recv_fd.recv(BUFFER)
-        if bf == b'':
-            self.close_fdsets((recv_fd, send_fd))
-            self.shutdown()
+        if recv_fd == self.fd:
+            bf = self.encoder.recv(recv_fd, BUFFER)
+            if bf == b'':
+                self.close_fdsets((recv_fd, send_fd))
+                self.shutdown()
 
-        send_fd.sendall(bf)
+            send_fd.sendall(bf)
+        else:
+            bf = recv_fd.recv(BUFFER)
+            if bf == b'':
+                self.close_fdsets((recv_fd, send_fd))
+                self.shutdown()
+
+            self.encoder.sendall(send_fd, bf)
 
     def close_fdsets(self, fdsets):
         try:
@@ -143,6 +155,11 @@ class SockV5Server:
 if '__main__' == __name__:
     fmt = '%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
+
+    e = RandomEncoder()
+    e.generate()
+    e.dump('/tmp/nmp.json')
+
     sockv5 = SockV5Server(1080)
     sockv5.bind_and_listen(listen_max=20)
     sockv5.accept_and_dispatch()
