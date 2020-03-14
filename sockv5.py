@@ -18,9 +18,11 @@ CMD_CONNECT = 1
 IMPLEMENTED_METHODS = (2, 0)
 
 class Handle:
-    def __init__(self, fd, addr):
+    def __init__(self, fd, addr, remote_host, remote_port):
         self.fd = fd
         self.addr = addr
+        self.host = remote_host
+        self.port = remote_port
         self.encoder = RandomEncoder()
         self.encoder.load('/tmp/nmp.json')
 
@@ -28,12 +30,12 @@ class Handle:
     def handle(self):
         if not self.handle_version_and_auth():
             self.close_fdsets((self.fd,))
-            return False
+            return
 
         fd = self.handle_connect()
         if not fd:
             self.close_fdsets((self.fd,))
-            return False
+            return
 
         self.enter_pip_loop(self.fd, fd)
 
@@ -72,7 +74,7 @@ class Handle:
         addr_num = struct.unpack('!I', socket.inet_aton(addr))[0]
         fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            fd.connect((addr, port))
+            self.setup_connection(fd, ATYP_IP_V4, addr, port)
             reply = struct.pack("!BBBBIH", SOCK_V5, 0, 0, 1, addr_num, port)
         except Exception as e:
             reply = struct.pack("!BBBBIH", SOCK_V5, 5, 1, 1, addr_num, port)
@@ -82,6 +84,26 @@ class Handle:
 
         self.encoder.sendall(self.fd, reply)
         return fd
+
+    # conenct
+    # dummy_len | dummy | atyp | port | host_len | host
+    # reply
+    # dummp_len | dummy | status
+    # @pysnooper.snoop()
+    def setup_connection(self, fd, addr_type, target_host, target_port):
+        target_host = target_host.encode('ascii')
+        dummy = b'foooooooooooooo'
+        bf = struct.pack('!B', len(dummy)) + dummy
+        bf += struct.pack("!BH", addr_type, target_port) + target_host
+        logging.info(bf)
+        fd.connect((self.host, self.port))
+        fd.sendall(bf)
+
+        recvbf = fd.recv(BUFFER)
+        dummy_len = struct.unpack('!B', recvbf[0:1])[0]
+        status = struct.unpack('!B', recvbf[dummy_len + 1 : dummy_len + 2])[0]
+        if status:
+            raise Exception("fail to setup connection, status = {}".format(status))
 
     def handle_noblock(self):
         thread = threading.Thread(target=self.handle, args=())
@@ -142,11 +164,11 @@ class SockV5Server:
         self.fd.bind(('0.0.0.0', self.port))
         self.fd.listen(listen_max)
 
-    def accept_and_dispatch(self):
+    def accept_and_dispatch(self, remote_host, remote_port):
         self.shutdown = False
         while not self.shutdown:
             fd, addr = self.fd.accept();
-            handle = Handle(fd, addr)
+            handle = Handle(fd, addr, remote_host, remote_port)
             handle.handle_noblock()
 
     def shutdown(self):
@@ -156,10 +178,6 @@ if '__main__' == __name__:
     fmt = '%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
 
-    e = RandomEncoder()
-    e.generate()
-    e.dump('/tmp/nmp.json')
-
-    sockv5 = SockV5Server(1080)
+    sockv5 = SockV5Server(1234)
     sockv5.bind_and_listen(listen_max=20)
-    sockv5.accept_and_dispatch()
+    sockv5.accept_and_dispatch('127.0.0.1', 1080)

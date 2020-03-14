@@ -5,17 +5,16 @@ import logging
 import threading
 import select
 import pysnooper
+import struct
 
 from encode import RandomEncoder
 
 BUFFER = 4096
 
 class Handle:
-    def __init__(self, fd, addr, host, port):
+    def __init__(self, fd, addr):
         self.fd = fd
         self.addr = addr
-        self.host = host
-        self.port = port
         self.encoder = RandomEncoder()
         self.encoder.load('/tmp/nmp.json')
 
@@ -23,12 +22,30 @@ class Handle:
     def handle(self):
         fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            fd.connect((self.host, self.port))
+            self.handle_connect(fd)
         except Exception as e:
             logging.info(e)
-            self.close_fdsets((fd))
+            self.close_fdsets((self.fd, fd))
+            return
 
         self.enter_pip_loop(self.fd, fd)
+
+    # conenct
+    # dummy_len | dummy | atyp | port | host_len | host
+    # reply
+    # dummp_len | dummy | status
+    # @pysnooper.snoop()
+    def handle_connect(self, fd):
+        bf = self.fd.recv(BUFFER)
+        dummy_len = struct.unpack('!B', bf[0:1])[0]
+        idx = dummy_len + 1
+        atyp, port = struct.unpack('!BH', bf[idx:idx + 3])
+        host = (bf[idx + 3:]).decode('ascii')
+        fd.connect((host, port))
+
+        dummy = b'barrrrrrrrrr'
+        sendbf = struct.pack('!B', len(dummy)) + dummy + struct.pack('!B', 0)
+        self.fd.sendall(sendbf)
 
     def handle_noblock(self):
         thread = threading.Thread(target=self.handle, args=())
@@ -77,7 +94,7 @@ class Handle:
     def shutdown(self):
         self.close_loop = True
 
-class Forwarder:
+class NmpServer:
     def __init__(self, port):
         self.port = port
         self.fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -89,11 +106,11 @@ class Forwarder:
         self.fd.bind(('0.0.0.0', self.port))
         self.fd.listen(listen_max)
 
-    def accept_and_dispatch(self, remote_host, remote_port):
+    def accept_and_dispatch(self):
         self.shutdown = False
         while not self.shutdown:
             fd, addr = self.fd.accept();
-            handle = Handle(fd, addr, remote_host, remote_port)
+            handle = Handle(fd, addr)
             handle.handle_noblock()
 
     def shutdown(self):
@@ -102,7 +119,11 @@ class Forwarder:
 if '__main__' == __name__:
     fmt = '%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
-    f = Forwarder(2021)
-    f.bind_and_listen(listen_max=20)
-    f.accept_and_dispatch('127.0.0.1', 1080)
 
+    # e = RandomEncoder()
+    # e.generate()
+    # e.dump('/tmp/nmp.json')
+
+    nmp = NmpServer(1080)
+    nmp.bind_and_listen(listen_max=20)
+    nmp.accept_and_dispatch()
