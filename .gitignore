@@ -1,2 +1,6 @@
 .env/
 __pycache__/
+nmp.egg-info
+dist
+build
+nmp/__pycache__/

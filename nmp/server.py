@@ -7,7 +7,7 @@ import select
 import pysnooper
 import struct
 
-from encode import RandomEncoder
+from nmp.encode import RandomEncoder
 
 BUFFER = 4096
 
