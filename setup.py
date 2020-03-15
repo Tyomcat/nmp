@@ -23,6 +23,7 @@ setup(
     install_requires = [
         'flask-restplus >= 0.13.0',
         'werkzeug==0.16.1',
+        'pysnooper>=0.3.0',
     ],
 
     entry_points={

@@ -34,8 +34,12 @@ $ python -m twine upload --repository-url https://test.pypi.org/legacy/ dist/*
 
 ### TODO
 
-- 代码易用性完善，参数配置化 p1
-- 线程池，事件驱动替换当前模型 p1
+- dummy 数据随机生成 p0
+- 客户端从 api server 动态更新 encoder p0
+- api server UUID 权限认证 p1
+- 易用性完善，参数配置化 p1
+- daemon 进程，进程优雅退出 p1
+- 线程池，事件驱动替换当前模型 p2
 - 单元测试，集成测试体系引入 p2
 - kcp 协议集成 p3
 - 英文版文档 p3

@@ -39,16 +39,16 @@ class RandomEncoder(Encoder):
     # @pysnooper.snoop()
     def encode(self, bf):
         arr = bytearray(bf)
-        # for i in range(0, len(arr)):
-        #     arr[i] = self.encode_table[arr[i]]
+        for i in range(0, len(arr)):
+            arr[i] = self.encode_table[arr[i]]
 
         return bytes(arr)
 
     # @pysnooper.snoop()
     def decode(self, bf):
         arr = bytearray(bf)
-        # for i in range(0, len(arr)):
-        #     arr[i] = self.decode_table[arr[i]]
+        for i in range(0, len(arr)):
+            arr[i] = self.decode_table[arr[i]]
 
         return bytes(arr)
 

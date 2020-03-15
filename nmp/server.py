@@ -36,7 +36,7 @@ class Handle:
     # dummp_len | dummy | status
     # @pysnooper.snoop()
     def handle_connect(self, fd):
-        bf = self.fd.recv(BUFFER)
+        bf = self.encoder.recv(self.fd, BUFFER)
         dummy_len = struct.unpack('!B', bf[0:1])[0]
         idx = dummy_len + 1
         atyp, port = struct.unpack('!BH', bf[idx:idx + 3])
@@ -45,7 +45,7 @@ class Handle:
 
         dummy = b'barrrrrrrrrr'
         sendbf = struct.pack('!B', len(dummy)) + dummy + struct.pack('!B', 0)
-        self.fd.sendall(sendbf)
+        self.encoder.sendall(self.fd, sendbf)
 
     def handle_noblock(self):
         thread = threading.Thread(target=self.handle, args=())
@@ -70,19 +70,19 @@ class Handle:
     def recv_and_send(self, recv_fd, send_fd):
         # recv() is a block I/O, returns '' when remote has been closed.
         if recv_fd == self.fd:
-            bf = recv_fd.recv(BUFFER)
-            if bf == b'':
-                self.close_fdsets((recv_fd, send_fd))
-                self.shutdown()
-
-            self.encoder.sendall(send_fd, bf)
-        else:
             bf = self.encoder.recv(recv_fd, BUFFER)
             if bf == b'':
                 self.close_fdsets((recv_fd, send_fd))
                 self.shutdown()
 
             send_fd.sendall(bf)
+        else:
+            bf = recv_fd.recv(BUFFER)
+            if bf == b'':
+                self.close_fdsets((recv_fd, send_fd))
+                self.shutdown()
+
+            self.encoder.sendall(send_fd, bf)
 
     def close_fdsets(self, fdsets):
         try:
@@ -120,9 +120,9 @@ if '__main__' == __name__:
     fmt = '%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
 
-    # e = RandomEncoder()
-    # e.generate()
-    # e.dump('/tmp/nmp.json')
+    e = RandomEncoder()
+    e.generate()
+    e.dump('/tmp/nmp.json')
 
     nmp = NmpServer(1080)
     nmp.bind_and_listen(listen_max=20)
