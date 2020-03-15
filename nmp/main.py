@@ -7,12 +7,17 @@ import argparse
 from nmp.server import NmpServer
 from nmp.sockv5 import SockV5Server
 from nmp.apiserver import NmpApi
+from nmp.encode import RandomEncoder
 
 def server_handle(args):
-    nmp = NmpServer(1080)
+    nmp = NmpServer(3389)
     api = NmpApi(nmp)
     logging.info('start api server...')
-    api.run(port=2333)
+    api.run(port=3306)
+
+    e = RandomEncoder()
+    e.generate()
+    e.dump('/tmp/nmp.json')
 
     logging.info('start server...')
     nmp.bind_and_listen(listen_max=20)

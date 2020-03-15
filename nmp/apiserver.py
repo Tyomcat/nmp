@@ -72,7 +72,7 @@ class NmpApi:
                 status, message = apiserver.dealloc_token(args['token'])
                 return {'status': status, 'data': message}
 
-        self.app.run(port=port)
+        self.app.run(host='0.0.0.0', port=port)
 
 
 if '__main__' == __name__:
