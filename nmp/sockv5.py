@@ -59,25 +59,25 @@ class Handle:
             return None
 
         if ATYP_IP_V4 == atyp:
-            addr = socket.inet_ntoa(bf[4:8])
+            addr = socket.inet_ntoa(bf[4:8]).encode('ascii')
             port = struct.unpack('!H', bf[8:10])[0]
             logging.info('connect to {}'.format(addr))
         elif ATYP_DOMAINNAME == atyp:
             addr_len = ord(bf[4:5])
-            addr = socket.gethostbyname(bf[5:(5 + addr_len)])
+            addr = bf[5:(5 + addr_len)]
             port = struct.unpack('!H', bf[5 + addr_len: 7 + addr_len])[0]
             logging.info('connect to {}'.format(bf[5:(5 + addr_len)]))
             logging.info('host to addr = {}'.format(addr))
         else:
             return None
 
-        addr_num = struct.unpack('!I', socket.inet_aton(addr))[0]
+        reply_host = struct.unpack('!I', socket.inet_aton(self.host))[0]
         fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            self.setup_connection(fd, ATYP_IP_V4, addr, port)
-            reply = struct.pack("!BBBBIH", SOCK_V5, 0, 0, 1, addr_num, port)
+            self.setup_connection(fd, atyp, addr, port)
+            reply = struct.pack("!BBBBIH", SOCK_V5, 0, 0, 1, reply_host, port)
         except Exception as e:
-            reply = struct.pack("!BBBBIH", SOCK_V5, 5, 1, 1, addr_num, port)
+            reply = struct.pack("!BBBBIH", SOCK_V5, 5, 1, 1, reply_host, port)
             logging.info(e)
             fd.close()
             fd = None
@@ -91,7 +91,6 @@ class Handle:
     # dummp_len | dummy | status
     # @pysnooper.snoop()
     def setup_connection(self, fd, addr_type, target_host, target_port):
-        target_host = target_host.encode('ascii')
         dummy = b'foooooooooooooo'
         bf = struct.pack('!B', len(dummy)) + dummy
         bf += struct.pack("!BH", addr_type, target_port) + target_host
