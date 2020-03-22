@@ -7,6 +7,7 @@ import select
 import pysnooper
 import struct
 
+from nmp.dummy import Dummy
 from nmp.encode import RandomEncoder
 
 BUFFER = 4096
@@ -15,6 +16,7 @@ class Handle:
     def __init__(self, fd, addr):
         self.fd = fd
         self.addr = addr
+        self.dummy = Dummy()
         self.encoder = RandomEncoder()
         self.encoder.load('/tmp/nmp.json')
 
@@ -37,14 +39,12 @@ class Handle:
     # @pysnooper.snoop()
     def handle_connect(self, fd):
         bf = self.encoder.recv(self.fd, BUFFER)
-        dummy_len = struct.unpack('!B', bf[0:1])[0]
-        idx = dummy_len + 1
-        atyp, port = struct.unpack('!BH', bf[idx:idx + 3])
-        host = (bf[idx + 3:]).decode('ascii')
+        offset = self.dummy.remove(bf)
+        atyp, port = struct.unpack('!BH', bf[offset:offset + 3])
+        host = (bf[offset + 3:]).decode('ascii')
         fd.connect((host, port))
 
-        dummy = b'barrrrrrrrrr'
-        sendbf = struct.pack('!B', len(dummy)) + dummy + struct.pack('!B', 0)
+        sendbf = self.dummy.add() + struct.pack('!B', 0)
         self.encoder.sendall(self.fd, sendbf)
 
     def handle_noblock(self):

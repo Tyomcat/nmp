@@ -7,6 +7,7 @@ import select
 import pysnooper
 import struct
 
+from nmp.dummy import Dummy
 from nmp.encode import RandomEncoder
 
 BUFFER = 4096
@@ -23,6 +24,7 @@ class Handle:
         self.addr = addr
         self.host = remote_host
         self.port = remote_port
+        self.dummy = Dummy()
         self.encoder = RandomEncoder()
         self.encoder.load('/tmp/nmp.json')
 
@@ -91,16 +93,15 @@ class Handle:
     # dummp_len | dummy | status
     # @pysnooper.snoop()
     def setup_connection(self, fd, addr_type, target_host, target_port):
-        dummy = b'foooooooooooooo'
-        bf = struct.pack('!B', len(dummy)) + dummy
+        bf = self.dummy.add()
         bf += struct.pack("!BH", addr_type, target_port) + target_host
         logging.info(bf)
         fd.connect((self.host, self.port))
         self.encoder.sendall(fd, bf)
 
         recvbf = self.encoder.recv(fd, BUFFER)
-        dummy_len = struct.unpack('!B', recvbf[0:1])[0]
-        status = struct.unpack('!B', recvbf[dummy_len + 1 : dummy_len + 2])[0]
+        offset = self.dummy.remove(recvbf)
+        status = struct.unpack('!B', recvbf[offset:offset + 1])[0]
         if status:
             raise Exception("fail to setup connection, status = {}".format(status))
 
