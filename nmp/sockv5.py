@@ -8,7 +8,7 @@ import pysnooper
 import struct
 
 from nmp.dummy import Dummy
-from nmp.encode import RandomEncoder
+from nmp.encode import EncoderPool
 
 BUFFER = 4096
 SOCK_V5 = 5
@@ -156,8 +156,11 @@ class SockV5Server:
     def __init__(self, port):
         self.port = port
         self.fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.ep = EncoderPool(prefix='http://127.0.0.1:3306/v1')
+        self.ep.alloc_from_apiserver(10)
 
     def __del__(self):
+        self.ep.dealloc_to_apiserver()
         self.fd.close()
 
     def bind_and_listen(self, listen_max):

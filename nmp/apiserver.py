@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import json
 import threading
 from flask import Flask, request
 from flask_restplus import Resource, Api, fields
@@ -10,6 +11,9 @@ class NmpApi:
         self.nmp = nmpserver
         self.namesapce = 'v1'
 
+    def set_encoder_pool(self, pool):
+        self.encoder_pool = pool
+
     def run(self, port):
         self.thread = threading.Thread(target=self.start_service, args=(port,))
         self.thread.daemon = True
@@ -18,10 +22,19 @@ class NmpApi:
     def auth(self, uuid):
         return True
 
-    def alloc_token(self):
-        return True, 'token-xxx'
+    def alloc_token(self, n):
+        encoders = self.encoder_pool.dynamic_alloc(n)
+        if not len(encoders):
+            return False, 'fail to alloc'
+        else:
+            dumps_encoders = {}
+            for k, v in encoders.items():
+                dumps_encoders[k] = v.dumps()
 
-    def dealloc_token(self, token):
+            return True, json.dumps(dumps_encoders)
+
+    def dealloc_token(self, tokens):
+        self.encoder_pool.dealloc(tokens)
         return True, 'success'
 
     def start_service(self, port):
@@ -40,36 +53,39 @@ class NmpApi:
             })
 
         # Request arguments
-        uuid_args = self.api.parser()
-        uuid_args.add_argument('uuid', required=True, help='uuid')
+        alloc_args = self.api.parser()
+        alloc_args.add_argument('uuid', required=True, help='uuid')
+        alloc_args.add_argument('n', required=True, help='n encoders')
 
-        token_args = self.api.parser()
-        token_args.add_argument('uuid', required=True, help='uuid')
-        token_args.add_argument('token', required=True, help='token')
+        dealloc_args = self.api.parser()
+        dealloc_args.add_argument('uuid', required=True, help='uuid')
+        dealloc_args.add_argument('tokens', required=True, help='tokens')
 
         # Api
         @namespace.route('/connect')
-        @namespace.expect(uuid_args)
+        @namespace.expect(alloc_args)
         class Connect(Resource):
             @namespace.marshal_with(status_model, envelope='data')
             def post(self):
-                args = uuid_args.parse_args()
+                args = alloc_args.parse_args()
                 if not apiserver.auth(args['uuid']):
                     return {'status': False, 'data': 'auth fail'}
 
-                status, message = apiserver.alloc_token()
+                status, message = apiserver.alloc_token(int(args['n']))
                 return {'status': status, 'data': message}
 
         @namespace.route('/disconnect')
-        @namespace.expect(token_args)
+        @namespace.expect(dealloc_args)
         class Disconnect(Resource):
             @namespace.marshal_with(status_model, envelope='data')
             def delete(self):
-                args = token_args.parse_args()
+                args = dealloc_args.parse_args()
                 if not apiserver.auth(args['uuid']):
                     return {'status': False, 'data': 'auth fail'}
 
-                status, message = apiserver.dealloc_token(args['token'])
+                tokens = json.loads(args['tokens'])
+                print(tokens)
+                status, message = apiserver.dealloc_token(tokens)
                 return {'status': status, 'data': message}
 
         self.app.run(host='0.0.0.0', port=port)
