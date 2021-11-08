@@ -21,10 +21,7 @@ setup(
     include_package_data=True,
     zip_safe=True,
     install_requires = [
-        'werkzeug==0.16.1',
-        'pysnooper>=0.3.0',
-        'requests>=2.23.0',
-        'flask-restplus >= 0.13.0',
+        'websockets >= 10.0',
     ],
 
     entry_points={

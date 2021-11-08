@@ -1,129 +1,51 @@
 #!/bin/env python3
 
-import socket
 import logging
-import threading
-import select
-import pysnooper
 import struct
+import asyncio
+import websockets
 
-from nmp.dummy import Dummy
-from nmp.encode import RandomEncoder
+from nmp.pipe import SocketStream, Pipe
 
-BUFFER = 4096
+NMP_CONNECT_OK = 1
 
-class Handle:
-    def __init__(self, fd, addr):
-        self.fd = fd
-        self.addr = addr
-        self.dummy = Dummy()
-        self.encoder = RandomEncoder()
-        self.encoder.load('/tmp/nmp.json')
 
-    # @pysnooper.snoop()
-    def handle(self):
-        fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            self.handle_connect(fd)
-        except Exception as e:
-            logging.info(e)
-            self.close_fdsets((self.fd, fd))
-            return
+class WebSockHandler:
+    def __init__(self, wsock) -> None:
+        self.wsock = wsock
+        self.sock = None
 
-        self.enter_pip_loop(self.fd, fd)
+    async def parse_and_reply(self) -> None:
+        req = await self.wsock.recv()
+        print(req)
+        atyp, port = struct.unpack('!BH', req[:3])
+        host = req[3:].decode('ascii')
+        reply = struct.pack('!B', NMP_CONNECT_OK)
+        await self.wsock.send(reply)
+        self.sock = await SocketStream.open_connection(host, port)
 
-    # conenct
-    # dummy_len | dummy | atyp | port | host_len | host
-    # reply
-    # dummp_len | dummy | status
-    # @pysnooper.snoop()
-    def handle_connect(self, fd):
-        bf = self.encoder.recv(self.fd, BUFFER)
-        offset = self.dummy.remove(bf)
-        atyp, port = struct.unpack('!BH', bf[offset:offset + 3])
-        host = (bf[offset + 3:]).decode('ascii')
-        fd.connect((host, port))
+    async def handle(self):
+        await self.parse_and_reply()
+        pipe = Pipe(self.wsock, self.sock)
+        await pipe.pipe()
 
-        sendbf = self.dummy.add() + struct.pack('!B', 0)
-        self.encoder.sendall(self.fd, sendbf)
-
-    def handle_noblock(self):
-        thread = threading.Thread(target=self.handle, args=())
-        thread.daemon = True
-        thread.start()
-
-    def enter_pip_loop(self, fd_a, fd_b):
-        self.close_loop = False
-        fdsets = [fd_a, fd_b]
-        while not self.close_loop:
-            try:
-                in_sets, out_sets, ex_sets = select.select(fdsets, [], [])
-                for fd in in_sets:
-                    if fd == fd_a:
-                        self.recv_and_send(fd_a, fd_b)
-                    elif fd == fd_b:
-                        self.recv_and_send(fd_b, fd_a)
-            except Exception as e:
-                self.close_fdsets((fd_a, fd_b))
-                self.shutdown()
-
-    def recv_and_send(self, recv_fd, send_fd):
-        # recv() is a block I/O, returns '' when remote has been closed.
-        if recv_fd == self.fd:
-            bf = self.encoder.recv(recv_fd, BUFFER)
-            if bf == b'':
-                self.close_fdsets((recv_fd, send_fd))
-                self.shutdown()
-
-            send_fd.sendall(bf)
-        else:
-            bf = recv_fd.recv(BUFFER)
-            if bf == b'':
-                self.close_fdsets((recv_fd, send_fd))
-                self.shutdown()
-
-            self.encoder.sendall(send_fd, bf)
-
-    def close_fdsets(self, fdsets):
-        try:
-            for fd in fdsets:
-                fd.close()
-        except Exception as e:
-            logging.error(e)
-
-    def shutdown(self):
-        self.close_loop = True
 
 class NmpServer:
     def __init__(self, port):
         self.port = port
-        self.fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    def __del__(self):
-        self.fd.close()
+    async def start_server(self):
+        async with websockets.serve(self.dispatch, '0.0.0.0', self.port):
+            await asyncio.Future()
 
-    def bind_and_listen(self, listen_max):
-        self.fd.bind(('0.0.0.0', self.port))
-        self.fd.listen(listen_max)
+    async def dispatch(self, wsock, path):
+        handler = WebSockHandler(wsock)
+        await handler.handle()
 
-    def accept_and_dispatch(self):
-        self.shutdown = False
-        while not self.shutdown:
-            fd, addr = self.fd.accept();
-            handle = Handle(fd, addr)
-            handle.handle_noblock()
-
-    def shutdown(self):
-        self.shutdown = True
 
 if '__main__' == __name__:
     fmt = '%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
 
-    e = RandomEncoder()
-    e.generate()
-    e.dump('/tmp/nmp.json')
-
-    nmp = NmpServer(1080)
-    nmp.bind_and_listen(listen_max=20)
-    nmp.accept_and_dispatch()
+    nmp = NmpServer(8888)
+    asyncio.run(nmp.start_server())

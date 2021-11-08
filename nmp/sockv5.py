@@ -1,16 +1,13 @@
 #!/bin/env python3
 
+import asyncio
 import socket
 import logging
-import threading
-import select
-import pysnooper
 import struct
+import websockets
+from nmp.pipe import Pipe, SocketStream
+from nmp.server import NMP_CONNECT_OK
 
-from nmp.dummy import Dummy
-from nmp.encode import EncoderPool
-
-BUFFER = 4096
 SOCK_V5 = 5
 RSV = 0
 ATYP_IP_V4 = 1
@@ -18,169 +15,100 @@ ATYP_DOMAINNAME = 3
 CMD_CONNECT = 1
 IMPLEMENTED_METHODS = (2, 0)
 
-class Handle:
-    def __init__(self, fd, addr, remote_host, remote_port):
-        self.fd = fd
-        self.addr = addr
-        self.host = remote_host
-        self.port = remote_port
-        self.dummy = Dummy()
-        self.encoder = RandomEncoder()
-        self.encoder.load('/tmp/nmp.json')
 
-    # @pysnooper.snoop()
-    def handle(self):
-        if not self.handle_version_and_auth():
-            self.close_fdsets((self.fd,))
+class SockHandler:
+    def __init__(self, sock):
+        self.host = '127.0.0.1'
+        self.sock = sock
+        self.wsock = None
+        self.pipeing = False
+
+    async def handle(self):
+        r = await self.parse_ver_and_reply()
+        if not r:
+            await self.sock.close()
             return
 
-        fd = self.handle_connect()
-        if not fd:
-            self.close_fdsets((self.fd,))
+        r = await self.connect_and_reply()
+        if not r:
+            await self.sock.close()
+            await self.wsock.close()
             return
 
-        self.enter_pip_loop(self.fd, fd)
+        pipe = Pipe(self.sock, self.wsock)
+        await pipe.pipe()
 
-    def handle_version_and_auth(self):
-        bf = self.fd.recv(BUFFER)
-        ver, nmethods = struct.unpack('!BB', bf[0:2])
+    async def parse_ver_and_reply(self):
+        req = await self.sock.recv()
+        ver, nmethods = struct.unpack('!BB', req[0:2])
         if SOCK_V5 != ver:
             return False
 
-        for method in [ord(bf[2 + i : 3 + i]) for i in range(nmethods)]:
+        for method in [ord(req[2 + i: 3 + i]) for i in range(nmethods)]:
             if method in IMPLEMENTED_METHODS:
-                self.fd.sendall(struct.pack('!BB', SOCK_V5, method))
+                await self.sock.send(struct.pack('!BB', SOCK_V5, method))
                 return True
 
         return False
 
-    def handle_connect(self):
-        bf = self.fd.recv(BUFFER)
-        ver, cmd, _, atyp = struct.unpack('!BBBB', bf[0:4])
+    async def connect_and_reply(self):
+        req = await self.sock.recv()
+        ver, cmd, _, atyp = struct.unpack('!BBBB', req[0:4])
         if CMD_CONNECT != cmd:
-            return None
+            return False
 
         if ATYP_IP_V4 == atyp:
-            addr = socket.inet_ntoa(bf[4:8]).encode('ascii')
-            port = struct.unpack('!H', bf[8:10])[0]
-            logging.info('connect to {}'.format(addr))
+            addr = socket.inet_ntoa(req[4:8]).encode('ascii')
+            port = struct.unpack('!H', req[8:10])[0]
         elif ATYP_DOMAINNAME == atyp:
-            addr_len = ord(bf[4:5])
-            addr = bf[5:(5 + addr_len)]
-            port = struct.unpack('!H', bf[5 + addr_len: 7 + addr_len])[0]
-            logging.info('connect to {}'.format(bf[5:(5 + addr_len)]))
-            logging.info('host to addr = {}'.format(addr))
+            addr_len = ord(req[4:5])
+            addr = req[5:(5 + addr_len)]
+            port = struct.unpack('!H', req[5 + addr_len: 7 + addr_len])[0]
         else:
-            return None
+            return False
 
-        reply_host = struct.unpack('!I', socket.inet_aton(self.host))[0]
-        fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            self.setup_connection(fd, atyp, addr, port)
-            reply = struct.pack("!BBBBIH", SOCK_V5, 0, 0, 1, reply_host, port)
-        except Exception as e:
-            reply = struct.pack("!BBBBIH", SOCK_V5, 5, 1, 1, reply_host, port)
-            logging.info(e)
-            fd.close()
-            fd = None
-
-        self.fd.sendall(reply)
-        return fd
-
-    # conenct
-    # dummy_len | dummy | atyp | port | host_len | host
-    # reply
-    # dummp_len | dummy | status
-    # @pysnooper.snoop()
-    def setup_connection(self, fd, addr_type, target_host, target_port):
-        bf = self.dummy.add()
-        bf += struct.pack("!BH", addr_type, target_port) + target_host
-        logging.info(bf)
-        fd.connect((self.host, self.port))
-        self.encoder.sendall(fd, bf)
-
-        recvbf = self.encoder.recv(fd, BUFFER)
-        offset = self.dummy.remove(recvbf)
-        status = struct.unpack('!B', recvbf[offset:offset + 1])[0]
-        if status:
-            raise Exception("fail to setup connection, status = {}".format(status))
-
-    def handle_noblock(self):
-        thread = threading.Thread(target=self.handle, args=())
-        thread.daemon = True
-        thread.start()
-
-    def enter_pip_loop(self, fd_a, fd_b):
-        self.close_loop = False
-        fdsets = [fd_a, fd_b]
-        while not self.close_loop:
-            try:
-                in_sets, out_sets, ex_sets = select.select(fdsets, [], [])
-                for fd in in_sets:
-                    if fd == fd_a:
-                        self.recv_and_send(fd_a, fd_b)
-                    elif fd == fd_b:
-                        self.recv_and_send(fd_b, fd_a)
-            except Exception as e:
-                self.close_fdsets((fd_a, fd_b))
-                self.shutdown()
-
-    def recv_and_send(self, recv_fd, send_fd):
-        # recv() is a block I/O, returns '' when remote has been closed.
-        if recv_fd == self.fd:
-            bf = recv_fd.recv(BUFFER)
-            if bf == b'':
-                self.close_fdsets((recv_fd, send_fd))
-                self.shutdown()
-
-            self.encoder.sendall(send_fd, bf)
+        logging.info(f'connect to {addr}')
+        nhost = struct.unpack('!I', socket.inet_aton(self.host))[0]
+        r = await self.open_connection(atyp, addr, port)
+        if r:
+            reply = struct.pack("!BBBBIH", SOCK_V5, 0, 0, 1, nhost, port)
+            await self.sock.send(reply)
+            return True
         else:
-            bf = self.encoder.recv(recv_fd, BUFFER)
-            if bf == b'':
-                self.close_fdsets((recv_fd, send_fd))
-                self.shutdown()
+            reply = struct.pack("!BBBBIH", SOCK_V5, 5, 1, 1, nhost, port)
+            await self.sock.send(reply)
+            return False
 
-            send_fd.sendall(bf)
+    async def open_connection(self, addr_type, target_host, target_port):
+        req = struct.pack("!BH", addr_type, target_port) + target_host
+        logging.info(req)
+        self.wsock = await websockets.connect('ws://127.0.0.1:8888/nmp')
+        await self.wsock.send(req)
+        reply = await self.wsock.recv()
+        code = struct.unpack('!B', reply[:1])[0]
+        if code != NMP_CONNECT_OK:
+            logging.error(f'connect nmp server failed, error code {code}')
+        return code == NMP_CONNECT_OK
 
-    def close_fdsets(self, fdsets):
-        try:
-            for fd in fdsets:
-                fd.close()
-        except Exception as e:
-            logging.error(e)
-
-    def shutdown(self):
-        self.close_loop = True
 
 class SockV5Server:
     def __init__(self, port):
         self.port = port
-        self.fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.ep = EncoderPool(prefix='http://127.0.0.1:3306/v1')
-        self.ep.alloc_from_apiserver(10)
 
-    def __del__(self):
-        self.ep.dealloc_to_apiserver()
-        self.fd.close()
+    async def start_server(self):
+        server = await asyncio.start_server(
+            self.dispatch, '127.0.0.1', self.port)
+        async with server:
+            await server.serve_forever()
 
-    def bind_and_listen(self, listen_max):
-        self.fd.bind(('0.0.0.0', self.port))
-        self.fd.listen(listen_max)
+    async def dispatch(self, r, w):
+        handler = SockHandler(SocketStream(r, w))
+        await handler.handle()
 
-    def accept_and_dispatch(self, remote_host, remote_port):
-        self.shutdown = False
-        while not self.shutdown:
-            fd, addr = self.fd.accept();
-            handle = Handle(fd, addr, remote_host, remote_port)
-            handle.handle_noblock()
-
-    def shutdown(self):
-        self.shutdown = True
 
 if '__main__' == __name__:
     fmt = '%(asctime)s:%(levelname)s:%(funcName)s:%(lineno)d:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
 
     sockv5 = SockV5Server(1234)
-    sockv5.bind_and_listen(listen_max=20)
-    sockv5.accept_and_dispatch('127.0.0.1', 1080)
+    asyncio.run(sockv5.start_server())
