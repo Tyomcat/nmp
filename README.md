@@ -5,7 +5,7 @@
 ```bash
 $ git clone https://github.com/Project-Nmp/nmp.git
 $ cd nmp
-$ python3.7 -m venv .env
+$ python3.8 -m venv .env
 $ source .env/bin/activate
 $ python setup.py develop
 ```
