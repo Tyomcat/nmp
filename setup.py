@@ -8,7 +8,7 @@ setup(
     author='RainMark',
     author_email='rain.by.zhou@gmail.com',
     description='Network Multistage Pxxxx/Net Manager Project',
-    url='https://github.com/Project-Nmp/nmp',
+    url='https://github.com/RainMark/nmp',
     classifiers=[
         'Operating System :: Unix',
         'Operating System :: MacOS',
@@ -21,8 +21,9 @@ setup(
     include_package_data=True,
     zip_safe=True,
     install_requires = [
-        'websockets >= 10.0',
-        'coloredlogs >= 15.0.1'
+        'websockets == 10.0',
+        'coloredlogs == 15.0.1',
+        'uvloop == 0.16.0',
     ],
 
     entry_points={

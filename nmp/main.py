@@ -14,6 +14,7 @@ logger = get_logger(__name__)
 
 class Config:
     def __init__(self):
+        self.uvloop = False
         self.server = None
         self.host = '127.0.0.1'
         self.port = 8888
@@ -34,6 +35,7 @@ class Config:
         parser.add_argument('--endpoint', dest='endpoint',
                             help='nmp server endpoint (wss://example.com)')
         parser.add_argument('--token', dest='token', help='nmp server token')
+        parser.add_argument('--uvloop', dest='uvloop', help='use uvloop')
         args = parser.parse_args()
         if args.server:
             self.server = args.server
@@ -45,6 +47,8 @@ class Config:
             self.endpoint = args.endpoint
         if args.token:
             self.token = args.token
+        if args.uvloop and 'yes' == args.uvloop:
+            self.uvloop = True
 
         if not self.validate():
             parser.print_help()
@@ -73,6 +77,9 @@ def start_sockv5_server(config):
 def main():
     config = Config()
     config.from_args()
+    if config.uvloop:
+        import uvloop
+        uvloop.install()
     if config.server == 'sockv5':
         start_sockv5_server(config)
     else:
