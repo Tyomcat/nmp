@@ -1,6 +1,6 @@
 ## Project Nmp
 
-### 环境准备
+### Setup
 
 ```bash
 $ git clone https://github.com/Project-Nmp/nmp.git
@@ -10,36 +10,39 @@ $ source .env/bin/activate
 $ python setup.py develop
 ```
 
-### 服务启动
+### Get Started
 
-- 启动服务端
-
-```bash
-$ nmp server
-```
-
-- 启动本地 socks 服务
+- Start Nmp Server
 
 ```bash
-$ nmp socks
+$ nmp --server nmp --port 10010
+[2021-11-09 02:16:15,702] [   INFO] [main.py -- start_nmp_server():62] start nmp server: (127.0.0.1:10010)
+[2021-11-09 02:16:15,703] [   INFO] [server.py -- start_server():56] ### Token: f353f0ab21e2d93c ###
 ```
 
-### 打包上传
+- Caddy2 Config
 
 ```bash
-$ python setup.py sdist bdist_wheel
-$ python -m twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+nmp.example.io {
+  reverse_proxy 127.0.0.1:10010 {
+    header_up -Origin
+  }
+
+  tls {
+    dns cloudflare your_api_token
+  }
+}
 ```
 
+- Start Local Sockv5 Server
 
-### TODO
+```bash
+$ nmp --server sockv5 --endpoint wss://nmp.example.io --port 1234 --token f353f0ab21e2d93c
+[2021-11-09 15:20:58,781] [   INFO] [main.py -- start_sockv5_server():68] start sockv5 server: (127.0.0.1:1234)
+```
 
-- dummy 数据随机生成 p0
-- 客户端从 api server 动态更新 encoder p0
-- api server UUID 权限认证 p1
-- 易用性完善，参数配置化 p1
-- daemon 进程，进程优雅退出 p1
-- 线程池，事件驱动替换当前模型 p2
-- 单元测试，集成测试体系引入 p2
-- kcp 协议集成 p3
-- 英文版文档 p3
+- Test
+
+```bash
+all_proxy='socks5h://127.0.0.1:1234' curl https://www.google.com
+```
