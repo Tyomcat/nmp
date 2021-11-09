@@ -3,7 +3,7 @@
 ### Setup
 
 ```bash
-$ git clone https://github.com/Project-Nmp/nmp.git
+$ git clone https://github.com/RainMark/nmp.git
 $ cd nmp
 $ python3.8 -m venv .env
 $ source .env/bin/activate
