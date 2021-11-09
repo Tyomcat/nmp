@@ -1,37 +1,47 @@
 #!/bin/env python3
 
 import asyncio
+import websockets
+from nmp.log import get_logger
 
 BUFFER_SIZE = 4096
 
 
 class SocketStream:
-    def __init__(self, reader, writer) -> None:
-       self.reader = reader
-       self.writer = writer
+    def __init__(self, reader, writer):
+        self.logger = get_logger(__name__)
+        self.reader = reader
+        self.writer = writer
+        self.closed = False
 
     async def send(self, msg):
         self.writer.write(msg)
         await self.writer.drain()
 
     async def recv(self):
-        print('recv')
+        self.logger.debug('recv')
         msg = await self.reader.read(BUFFER_SIZE)
-        print(msg)
+        self.logger.debug(msg)
         return msg
 
     async def close(self):
+        self.closed = True
         self.writer.close()
         await self.writer.wait_closed()
 
     @staticmethod
     async def open_connection(host, port):
-       r, w = await asyncio.open_connection(host, port)
-       return SocketStream(r, w)
+        try:
+            r, w = await asyncio.open_connection(host, port)
+            return SocketStream(r, w)
+        except Exception as e:
+            get_logger(__name__).warning(e)
+            return None
 
 
 class Pipe:
-    def __init__(self, sock1, sock2) -> None:
+    def __init__(self, sock1, sock2):
+        self.logger = get_logger(__name__)
         self.sock1 = sock1
         self.sock2 = sock2
         self.pipeing = False
@@ -43,9 +53,12 @@ class Pipe:
                 if not len(msg):
                     await self.close()
                 await w.send(msg)
+            except (websockets.exceptions.ConnectionClosed, ConnectionResetError) as e:
+                await self.close()
+                self.logger.debug(e)
             except Exception as e:
                 await self.close()
-                print(e)
+                self.logger.warning(e)
 
     async def pipe(self):
         self.pipeing = True

@@ -1,0 +1,13 @@
+#!/bin/env python3
+
+# sockv5
+SOCK_V5 = 5
+RSV = 0
+ATYP_IP_V4 = 1
+ATYP_DOMAINNAME = 3
+CMD_CONNECT = 1
+IMPLEMENTED_METHODS = (2, 0)
+
+# nmp
+NMP_CONNECT_OK = 0
+NMP_CONNECT_FAILED = 1

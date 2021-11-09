@@ -22,6 +22,7 @@ setup(
     zip_safe=True,
     install_requires = [
         'websockets >= 10.0',
+        'coloredlogs >= 15.0.1'
     ],
 
     entry_points={
