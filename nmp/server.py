@@ -1,11 +1,14 @@
 #!/bin/env python3
 
 import asyncio
+import json
 import os
 import secrets
+import string
 import struct
 import websockets
-from random import randint
+from random import randint, choices
+from http import HTTPStatus
 from nmp.log import get_logger
 from nmp.pipe import SocketStream, Pipe
 from nmp.proto import *
@@ -51,30 +54,40 @@ class NmpServer:
             with open(self.config.conf, 'w') as f:
                 f.write(self.token)
 
+    def token_auth(self, path):
+        # /token/dummy
+        return self.token == path[1:].split('/')[0]
+
+    def http_handler(self, path, headers):
+        self.logger.info(path)
+        if self.token_auth(path):
+            return None
+
+        self.logger.warning(
+            f'auth token failed, path: {path}, headers: {headers}')
+        status = [HTTPStatus.NOT_FOUND,
+                  HTTPStatus.INTERNAL_SERVER_ERROR,
+                  HTTPStatus.OK][randint(0, 2)]
+        reply = {'data': ''.join(
+            choices(string.ascii_letters + string.digits, k=32))}
+        return status, {'Content-Type': 'application/json'}, json.dumps(reply).encode('utf-8')
+
     async def start_server(self):
         self.load_token()
         self.logger.info(f'### Token: {self.token} ###')
-        async with websockets.serve(self.dispatch, self.config.host, self.config.port):
+        async with websockets.serve(self.dispatch, self.config.host, self.config.port,
+                                    process_request=self.http_handler):
             await asyncio.Future()
 
     async def dispatch(self, wsock, path):
         handler = WebSockHandler(wsock)
         self.logger.debug(f'connect: {path}')
-        if not self.token_auth(path):
-            self.logger.warning(f'auth token failed, path: {path}')
-            await wsock.close()
-            return
-
         try:
             await handler.handle()
         except Exception as e:
             self.logger.warning(e)
             if not wsock.closed:
                 await handler.sock.close()
-
-    def token_auth(self, path):
-        # /token/dummy
-        return self.token == path[1:].split('/')[0]
 
 
 if '__main__' == __name__:

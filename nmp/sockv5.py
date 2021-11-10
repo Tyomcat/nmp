@@ -3,6 +3,7 @@
 import asyncio
 import secrets
 import socket
+import ssl
 import struct
 import websockets
 from random import randint
@@ -80,10 +81,15 @@ class SockHandler:
         self.logger.debug(req)
         try:
             dummy = secrets.token_hex(randint(1, 16))
+            context = ssl.create_default_context()
+            context.options |= ssl.OP_NO_TLSv1
+            context.options |= ssl.OP_NO_TLSv1_1
+            context.options |= ssl.OP_NO_TLSv1_3
             uri = f'{self.endpoint}/{self.token}/{dummy}'
-            wsock = await websockets.connect(uri)
+            wsock = await websockets.connect(uri, ssl=context,
+                                             server_hostname=self.endpoint.split('/')[2])
         except Exception as e:
-            self.logger.warning(e)
+            self.logger.exception(e)
             return None
 
         await wsock.send(req)

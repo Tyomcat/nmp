@@ -35,7 +35,7 @@ class SocketStream:
             r, w = await asyncio.open_connection(host, port)
             return SocketStream(r, w)
         except Exception as e:
-            get_logger(__name__).warning(e)
+            get_logger(__name__).exception(e)
             return None
 
 
@@ -58,7 +58,7 @@ class Pipe:
                 self.logger.debug(e)
             except Exception as e:
                 await self.close()
-                self.logger.warning(e)
+                self.logger.exception(e)
 
     async def pipe(self):
         self.pipeing = True
