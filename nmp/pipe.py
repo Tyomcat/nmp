@@ -47,13 +47,18 @@ class Pipe:
         self.pipeing = False
 
     async def recv_and_send(self, r, w):
+        exceptions = (RuntimeError,
+                      TimeoutError,
+                      ConnectionResetError,
+                      websockets.exceptions.ConnectionClosedError,
+                      websockets.exceptions.ConnectionClosedOK)
         while self.pipeing:
             try:
                 msg = await r.recv()
                 if not len(msg):
                     await self.close()
                 await w.send(msg)
-            except (websockets.exceptions.ConnectionClosed, ConnectionResetError) as e:
+            except exceptions as e:
                 await self.close()
                 self.logger.debug(e)
             except Exception as e:
