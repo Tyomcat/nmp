@@ -62,8 +62,8 @@ class Pipe:
 
     async def pipe(self):
         self.pipeing = True
-        asyncio.create_task(self.recv_and_send(self.sock1, self.sock2))
-        asyncio.create_task(self.recv_and_send(self.sock2, self.sock1))
+        await asyncio.gather(asyncio.create_task(self.recv_and_send(self.sock1, self.sock2)),
+                             asyncio.create_task(self.recv_and_send(self.sock2, self.sock1)))
 
     async def close(self):
         self.pipeing = False
