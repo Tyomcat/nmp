@@ -4,7 +4,7 @@ import asyncio
 import websockets
 from nmp.log import get_logger
 
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 2 ** 16
 
 
 class SocketStream:
@@ -62,10 +62,8 @@ class Pipe:
 
     async def pipe(self):
         self.pipeing = True
-        task1 = asyncio.create_task(self.recv_and_send(self.sock1, self.sock2))
-        task2 = asyncio.create_task(self.recv_and_send(self.sock2, self.sock1))
-        await task2
-        await task1
+        asyncio.create_task(self.recv_and_send(self.sock1, self.sock2))
+        asyncio.create_task(self.recv_and_send(self.sock2, self.sock1))
 
     async def close(self):
         self.pipeing = False

@@ -2,8 +2,10 @@
 
 import asyncio
 import argparse
-import sys
+import functools
 import os
+import signal
+import sys
 from pathlib import Path
 from nmp.log import get_logger
 from nmp.server import NmpServer
@@ -62,16 +64,31 @@ class Config:
         return True
 
 
-def start_nmp_server(config):
+def add_stop_signal():
+    def shutdown(name, loop):
+        logger.info(f'stop for signal: {name}')
+        logger.info(f'cancel {len(asyncio.all_tasks())} tasks')
+        loop.stop()
+
+    loop = asyncio.get_running_loop()
+    for name in ('SIGINT', 'SIGTERM'):
+        loop.add_signal_handler(
+            getattr(signal, name),
+            functools.partial(shutdown, name, loop))
+
+
+async def start_nmp_server(config):
     logger.info(f'start nmp server: ({config.host}:{config.port})')
+    add_stop_signal()
     nmp = NmpServer(config)
-    asyncio.run(nmp.start_server())
+    await nmp.start_server()
 
 
-def start_sockv5_server(config):
+async def start_sockv5_server(config):
     logger.info(f'start sockv5 server: ({config.host}:{config.port})')
+    add_stop_signal()
     sockv5 = SockV5Server(config)
-    asyncio.run(sockv5.start_server())
+    await sockv5.start_server()
 
 
 def main():
@@ -80,10 +97,15 @@ def main():
     if config.uvloop:
         import uvloop
         uvloop.install()
-    if config.server == 'sockv5':
-        start_sockv5_server(config)
-    else:
-        start_nmp_server(config)
+    try:
+        if config.server == 'sockv5':
+            asyncio.run(start_sockv5_server(config))
+        else:
+            asyncio.run(start_nmp_server(config))
+    except Exception as e:
+        logger.info(e)
+    finally:
+        logger.info('stoped')
 
 
 if '__main__' == __name__:
