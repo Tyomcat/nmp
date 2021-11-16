@@ -1,7 +1,10 @@
 #!/bin/env python3
 
 import asyncio
+import secrets
+import ssl
 import websockets
+from random import randint
 from nmp.log import get_logger
 
 BUFFER_SIZE = 2 ** 16
@@ -9,7 +12,7 @@ BUFFER_SIZE = 2 ** 16
 
 class SocketStream:
     def __init__(self, reader, writer):
-        self.logger = get_logger(__name__)
+        self.logger = get_logger(self.__class__.__name__)
         self.reader = reader
         self.writer = writer
         self.closed = False
@@ -36,6 +39,26 @@ class SocketStream:
             return SocketStream(r, w)
         except Exception as e:
             get_logger(__name__).exception(e)
+            return None
+
+
+class WebSockStream:
+    def __init__(self):
+        self.logger = get_logger(self.__class__.__name__)
+
+    @staticmethod
+    async def open(endpoint, token):
+        try:
+            dummy = secrets.token_hex(randint(1, 16))
+            context = ssl.create_default_context()
+            context.options |= ssl.OP_NO_TLSv1
+            context.options |= ssl.OP_NO_TLSv1_1
+            context.options |= ssl.OP_NO_TLSv1_3
+            uri = f'{endpoint}/{token}/{dummy}'
+            return await websockets.connect(uri, ssl=context,
+                                            server_hostname=endpoint.split('/')[2])
+        except Exception as e:
+            get_logger(WebSockStream.__name__).exception(e)
             return None
 
 

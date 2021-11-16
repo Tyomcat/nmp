@@ -1,14 +1,10 @@
 #!/bin/env python3
 
 import asyncio
-import secrets
 import socket
-import ssl
 import struct
-import websockets
-from random import randint
 from nmp.log import get_logger
-from nmp.pipe import Pipe, SocketStream
+from nmp.pipe import Pipe, SocketStream, WebSockStream
 from nmp.proto import *
 
 
@@ -76,22 +72,13 @@ class SockHandler:
             await self.sock.send(reply)
             return None
 
-    async def open_connection(self, addr_type, target_host, target_port):
-        req = struct.pack("!BH", addr_type, target_port) + target_host
+    async def open_connection(self, target_host, target_port):
+        req = struct.pack("!BH", NMP_PROTO_TCP, target_port) + target_host
         self.logger.debug(req)
-        try:
-            dummy = secrets.token_hex(randint(1, 16))
-            context = ssl.create_default_context()
-            context.options |= ssl.OP_NO_TLSv1
-            context.options |= ssl.OP_NO_TLSv1_1
-            context.options |= ssl.OP_NO_TLSv1_3
-            uri = f'{self.endpoint}/{self.token}/{dummy}'
-            wsock = await websockets.connect(uri, ssl=context,
-                                             server_hostname=self.endpoint.split('/')[2])
-        except Exception as e:
-            self.logger.exception(e)
+        wsock = await WebSockStream.open(self.endpoint, self.token)
+        if not wsock:
+            self.logger.warning(f'fail to connect {self.endpoint}')
             return None
-
         await wsock.send(req)
         reply = await wsock.recv()
         code = struct.unpack('!B', reply[:1])[0]
