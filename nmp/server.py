@@ -10,8 +10,8 @@ import websockets
 from random import randint, choices
 from http import HTTPStatus
 from nmp.log import get_logger
-from nmp.pipe import SocketStream, Pipe
-from nmp.proto import *
+from nmp.pipe import DatagramPipe, SocketStream, Pipe
+from nmp.proto import NMP_CONNECT_FAILED, NMP_CONNECT_OK, NMP_TCP_PIPE_DOMAIN, NMP_TCP_PIPE_IP, NMP_UDP_PIPE_IP
 
 
 class WebSockHandler:
@@ -19,15 +19,15 @@ class WebSockHandler:
         self.logger = get_logger(__name__)
         self.wsock = wsock
 
-    async def parse_and_reply(self):
-        req = await self.wsock.recv()
-        self.logger.debug(req)
-        atyp, port = struct.unpack('!BH', req[:3])
-        host = req[3:].decode('ascii')
-        return await SocketStream.open_connection(host, port)
-
-    async def handle(self):
-        sock = await self.parse_and_reply()
+    # -----------------------
+    # | 2 bytes |    ...    |
+    # |  port   | ip/domain |
+    async def handle_stream_type(self, data):
+        port = struct.unpack('!H', data[:2])[0]
+        host = data[2:].decode()
+        self.logger.debug(host)
+        self.logger.debug(port)
+        sock = await SocketStream.open_connection(host, port)
         if not sock:
             reply = struct.pack('!B', NMP_CONNECT_FAILED)
             await self.wsock.send(reply)
@@ -38,6 +38,24 @@ class WebSockHandler:
         await self.wsock.send(reply)
         pipe = Pipe(self.wsock, sock)
         await pipe.pipe()
+
+    async def handle_datagram_type(self):
+        pipe = DatagramPipe(self.wsock)
+        await pipe.pipe()
+
+    # -----------
+    # | 1 bytes |
+    # |  type   |
+    async def handle(self):
+        req = await self.wsock.recv()
+        self.logger.debug(req)
+        rtype = struct.unpack('!B', req[:1])[0]
+        if rtype == NMP_TCP_PIPE_IP or rtype == NMP_TCP_PIPE_DOMAIN:
+            await self.handle_stream_type(req[1:])
+        if rtype == NMP_UDP_PIPE_IP:
+            await self.handle_datagram_type()
+        else:
+            self.logger.error(f'not supported type[{rtype}]')
 
 
 class NmpServer:
@@ -85,9 +103,9 @@ class NmpServer:
         try:
             await handler.handle()
         except Exception as e:
-            self.logger.warning(e)
+            self.logger.exception(e)
             if not wsock.closed:
-                await handler.sock.close()
+                await wsock.close()
 
 
 if '__main__' == __name__:

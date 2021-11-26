@@ -1,23 +1,19 @@
 #!/bin/env python3
 
 import asyncio
-import secrets
 import socket
-import ssl
 import struct
-import websockets
-from random import randint
+from nmp.connection import ConnectionPool
 from nmp.log import get_logger
 from nmp.pipe import Pipe, SocketStream
-from nmp.proto import *
+from nmp.proto import ATYP_DOMAINNAME, ATYP_IP_V4, CMD_CONNECT, IMPLEMENTED_METHODS, NMP_CONNECT_OK, SOCK_V5
 
 
 class SockHandler:
-    def __init__(self, config, sock):
+    def __init__(self, sock, pool: ConnectionPool):
         self.logger = get_logger(__name__)
-        self.token = config.token
-        self.endpoint = config.endpoint
         self.sock = sock
+        self.pool = pool
         self.pipeing = False
 
     async def handle(self):
@@ -54,11 +50,11 @@ class SockHandler:
             return None
 
         if ATYP_IP_V4 == atyp:
-            addr = socket.inet_ntoa(req[4:8]).encode('ascii')
+            addr = socket.inet_ntoa(req[4:8]).encode()
             port = struct.unpack('!H', req[8:10])[0]
         elif ATYP_DOMAINNAME == atyp:
             addr_len = ord(req[4:5])
-            addr = req[5:(5 + addr_len)]
+            addr = req[5:5 + addr_len]
             port = struct.unpack('!H', req[5 + addr_len: 7 + addr_len])[0]
         else:
             return None
@@ -77,19 +73,11 @@ class SockHandler:
             return None
 
     async def open_connection(self, addr_type, target_host, target_port):
-        req = struct.pack("!BH", addr_type, target_port) + target_host
+        req = bytearray(struct.pack("!BH", addr_type, target_port))
+        req.extend(target_host)
         self.logger.debug(req)
-        try:
-            dummy = secrets.token_hex(randint(1, 16))
-            context = ssl.create_default_context()
-            context.options |= ssl.OP_NO_TLSv1
-            context.options |= ssl.OP_NO_TLSv1_1
-            context.options |= ssl.OP_NO_TLSv1_3
-            uri = f'{self.endpoint}/{self.token}/{dummy}'
-            wsock = await websockets.connect(uri, ssl=context,
-                                             server_hostname=self.endpoint.split('/')[2])
-        except Exception as e:
-            self.logger.exception(e)
+        wsock = await self.pool.new_connection()
+        if not wsock:
             return None
 
         await wsock.send(req)
@@ -107,6 +95,7 @@ class SockV5Server:
     def __init__(self, config):
         self.logger = get_logger(__name__)
         self.config = config
+        self.pool = ConnectionPool(config.endpoint, config.token)
 
     async def start_server(self):
         server = await asyncio.start_server(
@@ -115,7 +104,7 @@ class SockV5Server:
             await server.serve_forever()
 
     async def dispatch(self, r, w):
-        handler = SockHandler(self.config, SocketStream(r, w))
+        handler = SockHandler(SocketStream(r, w), self.pool)
         try:
             await handler.handle()
         except Exception as e:

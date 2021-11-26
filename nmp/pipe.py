@@ -1,8 +1,11 @@
 #!/bin/env python3
 
 import asyncio
+import socket
+import struct
 import websockets
 from nmp.log import get_logger
+from nmp.proto import NMP_CONNECT_FAILED, NMP_CONNECT_OK
 
 BUFFER_SIZE = 2 ** 16
 
@@ -39,6 +42,11 @@ class SocketStream:
             return None
 
 
+PIPE_EXCEPTION = (RuntimeError, TimeoutError, ConnectionResetError,
+                  websockets.ConnectionClosedError,
+                  websockets.ConnectionClosedOK)
+
+
 class Pipe:
     def __init__(self, sock1, sock2):
         self.logger = get_logger(__name__)
@@ -47,18 +55,13 @@ class Pipe:
         self.pipeing = False
 
     async def recv_and_send(self, r, w):
-        exceptions = (RuntimeError,
-                      TimeoutError,
-                      ConnectionResetError,
-                      websockets.exceptions.ConnectionClosedError,
-                      websockets.exceptions.ConnectionClosedOK)
         while self.pipeing:
             try:
                 msg = await r.recv()
                 if not len(msg):
                     await self.close()
                 await w.send(msg)
-            except exceptions as e:
+            except PIPE_EXCEPTION as e:
                 await self.close()
                 self.logger.debug(e)
             except Exception as e:
@@ -74,3 +77,81 @@ class Pipe:
         self.pipeing = False
         await self.sock1.close()
         await self.sock2.close()
+
+
+class DatagramHandler:
+    def __init__(self, message, future):
+        self.logger = get_logger(__name__)
+        self.message = message
+        self.future = future
+        self.transport = None
+
+    def connection_made(self, transport):
+        self.logger.debug(f'send: {self.message}')
+        self.transport = transport
+        self.transport.sendto(self.message)
+
+    def datagram_received(self, data, addr):
+        self.logger.debug(f'received: {data}')
+        self.future.set_result(data)
+        self.transport.close()
+
+    def error_received(self, exc):
+        self.logger.debug(f'exception: {exc}')
+        self.future.set_result(None)
+
+    def connection_lost(self, exc):
+        self.logger.debug(f'connection lost')
+
+
+class DatagramPipe:
+    def __init__(self, wsock):
+        self.logger = get_logger(__name__)
+        self.wsock = wsock
+
+    async def accept(self):
+        msg = await self.wsock.recv()
+        self.logger.debug(msg)
+        if not len(msg):
+            self.logger.debug(f'websocket connection[{self.wsock}] closed')
+            return False
+
+        await self.send_and_reply(msg)
+        return True
+
+    # -------------------------------
+    # | 4 bytes | 2 bytes  |  ...   |
+    # |   ip   |   port   | payload |
+    async def send_and_reply(self, msg):
+        host = socket.inet_ntoa(msg[:4])
+        port = struct.unpack('!H', msg[4:6])[0]
+        payload = msg[6:]
+        self.logger.debug(host)
+        self.logger.debug(port)
+        self.logger.debug(payload)
+
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        transport, protocol = await loop.create_datagram_endpoint(
+            lambda: DatagramHandler(payload, future), remote_addr=(host, port))
+        data = await protocol.future
+        transport.close()
+        if not data:
+            reply = struct.pack('!B', NMP_CONNECT_FAILED)
+            await self.wsock.send(msg)
+        reply = bytearray(struct.pack('!B', NMP_CONNECT_OK))
+        reply.extend(data)
+        await self.wsock.send(reply)
+
+    async def pipe(self):
+        pipeing = True
+        while pipeing:
+            try:
+                pipeing = await self.accept()
+            except PIPE_EXCEPTION as e:
+                self.logger.debug(e)
+                pipeing = False
+            except Exception as e:
+                self.logger.exception(e)
+                pipeing = False
+        await self.wsock.close()

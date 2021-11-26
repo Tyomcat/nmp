@@ -103,7 +103,7 @@ def main():
         else:
             asyncio.run(start_nmp_server(config))
     except Exception as e:
-        logger.info(e)
+        logger.exception(e)
     finally:
         logger.info('stoped')
 
