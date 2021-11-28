@@ -111,8 +111,3 @@ class SockV5Server:
             self.logger.warning(e)
             if not handler.sock.closed:
                 await handler.sock.close()
-
-
-if '__main__' == __name__:
-    sockv5 = SockV5Server(1234)
-    asyncio.run(sockv5.start_server())

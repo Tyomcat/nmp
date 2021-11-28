@@ -77,7 +77,7 @@ class NmpServer:
         return self.token == path[1:].split('/')[0]
 
     def http_handler(self, path, headers):
-        self.logger.info(path)
+        self.logger.debug(path)
         if self.token_auth(path):
             return None
 
@@ -106,8 +106,3 @@ class NmpServer:
             self.logger.exception(e)
             if not wsock.closed:
                 await wsock.close()
-
-
-if '__main__' == __name__:
-    nmp = NmpServer(8888)
-    asyncio.run(nmp.start_server())

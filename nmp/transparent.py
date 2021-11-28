@@ -37,6 +37,7 @@ from nmp.proto import NMP_CONNECT_OK, NMP_TCP_PIPE_IP
 
 MAX_MSG_BUF_SIZE = 2 ** 16
 MAX_IDLE_CONNECTION = 2 ** 10
+MAX_BACKLOG = 2 ** 10
 
 # TPROXY
 IP_TRANSPARENT = 19
@@ -91,7 +92,8 @@ class DatagramHandler:
         await self.pool.close_connection(wsock)
         statu = struct.unpack('!B', reply[:1])[0]
         if statu != NMP_CONNECT_OK:
-            self.logger.warning(f'forward message failed, {addr}')
+            self.logger.warning(
+                f'forward message failed, addr={addr}, error={statu}')
             return None
 
         return reply[1:]
@@ -128,7 +130,6 @@ class StreamHandler:
 
     async def open_remote_connection(self):
         host, port = self.get_dst_addr()
-        port = 1234
         self.logger.debug(host)
         self.logger.debug(port)
         req = bytearray(struct.pack("!BH", NMP_TCP_PIPE_IP, port))
@@ -150,19 +151,19 @@ class StreamHandler:
 
 
 class TransparentServer:
-    def __init__(self):
+    def __init__(self, config):
         self.logger = get_logger(__name__)
+        self.config = config
         self.stream_sock = None
         self.datagram_sock = None
-        self.pool = ConnectionPool(
-            'ws://127.0.0.1:8888', '729aabb33001e829df1d377253eb0b')
+        self.pool = ConnectionPool(config.endpoint, config.token)
 
     def new_datagram_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
         sock.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
-        sock.bind(('0.0.0.0', 1111))
+        sock.bind((self.config.host, self.config.port))
         return sock
 
     def datagram_handler(self):
@@ -184,8 +185,8 @@ class TransparentServer:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-        sock.bind(('0.0.0.0', 2222))
-        sock.listen(1024)
+        sock.bind((self.config.host, self.config.port))
+        sock.listen(MAX_BACKLOG)
         return sock
 
     async def stream_handler(self, r, w):
@@ -214,9 +215,3 @@ class TransparentServer:
             self.stream_sock.close()
         if self.datagram_sock:
             self.datagram_sock.close()
-
-
-if '__main__' == __name__:
-    server = TransparentServer()
-    asyncio.run(server.start_server())
-    # asyncio.run(server.start_datagram_server())

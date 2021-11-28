@@ -10,6 +10,7 @@ from pathlib import Path
 from nmp.log import get_logger
 from nmp.server import NmpServer
 from nmp.sockv5 import SockV5Server
+from nmp.transparent import TransparentServer
 
 logger = get_logger(__name__)
 
@@ -44,7 +45,7 @@ class Config:
         if args.host:
             self.host = args.host
         if args.port:
-            self.port = args.port
+            self.port = int(args.port)
         if args.endpoint:
             self.endpoint = args.endpoint
         if args.token:
@@ -59,7 +60,7 @@ class Config:
     def validate(self):
         if not self.server:
             return False
-        if self.server == 'sockv5':
+        if self.server == 'sockv5' or self.server == 'tproxy':
             return self.endpoint and self.token
         return True
 
@@ -91,6 +92,13 @@ async def start_sockv5_server(config):
     await sockv5.start_server()
 
 
+async def start_transparent_server(config):
+    logger.info(f'start transparent server: ({config.host}:{config.port})')
+    add_stop_signal()
+    transparent = TransparentServer(config)
+    await transparent.start_server()
+
+
 def main():
     config = Config()
     config.from_args()
@@ -100,6 +108,8 @@ def main():
     try:
         if config.server == 'sockv5':
             asyncio.run(start_sockv5_server(config))
+        elif config.server == 'tproxy':
+            asyncio.run(start_transparent_server(config))
         else:
             asyncio.run(start_nmp_server(config))
     except Exception as e:

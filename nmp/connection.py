@@ -6,9 +6,8 @@ import struct
 import websockets
 from collections import deque
 from random import randint
-
 from nmp.log import get_logger
-from nmp.proto import NMP_CONNECT_OK, NMP_UDP_PIPE_IP
+from nmp.proto import NMP_UDP_PIPE_IP
 
 MAX_MSG_BUF_SIZE = 2 ** 16
 MAX_IDLE_CONNECTION = 2 ** 10
@@ -42,9 +41,11 @@ class ConnectionPool:
             context.options |= ssl.OP_NO_TLSv1_1
             context.options |= ssl.OP_NO_TLSv1_3
             uri = f'{self.endpoint}/{self.token}/{dummy}'
-            # return await websockets.connect(uri, ssl=context,
-            #                                 server_hostname=self.endpoint.split('/')[2])
-            return await websockets.connect(uri)
+            if self.endpoint.startswith('wss://'):
+                return await websockets.connect(uri, ssl=context,
+                                                server_hostname=self.endpoint.split('/')[2])
+            else:
+                return await websockets.connect(uri)
         except Exception as e:
             self.logger.exception(e)
             return None
